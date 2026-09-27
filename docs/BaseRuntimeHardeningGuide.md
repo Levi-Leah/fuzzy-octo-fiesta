@@ -10,7 +10,7 @@ Use this guide when preparing a service image and its deployment. The [project R
 - Run the process directly with an exec-form `ENTRYPOINT` or `CMD`. Turn off reload modes, shell hooks, and write-on-start caches. Precompute assets where practical.
 - Retain the runtime image's non-root default, or use another approved non-root UID/GID. Test the user and file access in the **final service image**.
 
-> **Note:** This repository provides base images, not a universal application Dockerfile. The right `COPY`, ownership, and startup command depend on the language and service. A final-stage `USER root` or a copied shell can undo base hardening.
+> **Note:** The project plans to provide base images, not a universal application Dockerfile. The right `COPY`, ownership, and startup command depend on the language and service. A final-stage `USER root` or a copied shell can undo base hardening.
 
 ## 2. Check architecture and dependencies
 
