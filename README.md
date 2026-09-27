@@ -25,7 +25,7 @@ The planned builder image contains the tools needed to build a service. The runt
 
 These versions come from the supplied project description; they are not proof of availability. Floating `1` versions can change on refresh. Java's upstream base is reported as not digest pinned; review that limitation before relying on a fixed upstream input.
 
-## What the project publishes
+## Planned build and publication
 
 The supplied design calls for each language directory to contain `pipeline/Dockerfile.builder`, `pipeline/Dockerfile.runtime`, `buildargs.conf`, `records/gold-digests.json`, and a language `README.md`. It names `.github/workflows/gold-base-image.yml` as the shared workflow, with language workflows requesting a version and image type. These files are not present in this documentation repository yet.
 
