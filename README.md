@@ -1,38 +1,34 @@
 # Gold base container images
 
-This project is intended to provide shared container base images for Python, Go, Node.js, Java, and Rust. Each language has a builder image for compiling or installing dependencies and a smaller runtime image for running the service. Teams can build their own service images on top of these bases.
+This project builds shared builder and runtime images for application teams. A builder image has the tools needed to prepare an application. A runtime image contains what the application needs to run, without those build tools. Teams use the images from their own service repositories.
 
-The benefit is a consistent starting point. Build tools stay out of production images, and teams can use a published digest to choose an exact base image version.
+The shared images give services a consistent, smaller production base. They are built for both `linux/amd64` and `linux/arm64`, so the base can run in mixed architecture environments. Your application and its dependencies must also support the architecture you deploy.
 
-> **Current status:** This repository contains documentation only. It has no image build files, published digests, or images ready for use. The steps below apply after images and access instructions are published.
+## Available image families
+
+| Language | Versions | Runtime base | Build notes |
+| --- | --- | --- | --- |
+| Python | 3.13 | Distroless | See the Python README for runtime details |
+| Go | 1.26, 1 | Distroless static | `1` tracks the current Go 1 release |
+| Node.js | 20, 24 | Distroless | `pnpm` is in the builder only |
+| Java | 21, 25 | Distroless | Maven 3 is in the builder. Java uses the JDK trust store |
+| Rust | 1.90, 1 | Distroless static | The builder targets `musl`. `1` tracks the current Rust 1 release |
+
+.NET versions and its runtime base are still undecided. Use the published digest records to confirm which images can be pulled. Java's upstream base is not pinned by digest.
 
 ## Use an image
 
-1. Choose a published language and version. Check its language-specific instructions for build and startup details.
-2. Get the builder and runtime image references from the published digest record. Pin each image using its full registry address and digest, for example `registry/path@sha256:...`. The registry address and real digests have not been provided yet.
-3. Build your service and its dependencies in the builder stage. Copy only the files needed to run it into a final stage based on the runtime image.
-4. Scan and test your **final service image**. Deploy it with the settings required by the [Security Contract](docs/SecurityContract.md).
+1. Choose a language and version. Read that language's `README.md` for its build and startup details.
+2. Find the builder and runtime image digests in the language's `records/gold-digests.json` or the Gold Base Image Digests table. Use the full published registry reference and digest in your Dockerfile. A digest fixes the exact image version you build from.
+3. Build your application and dependencies with the builder image. Copy only the required application files into a final stage based on the runtime image.
+4. Scan and test the final service image. Apply the deployment controls in the [Security Contract](docs/SecurityContract.md). The [Hardening Guide](docs/BaseRuntimeHardeningGuide.md) shows how to implement and verify them.
 
-The planned runtime images use a small distroless base and start as a non-root user. Your service image and deployment can change those properties. Follow the [Hardening Guide](docs/BaseRuntimeHardeningGuide.md) to keep them and verify the result.
+> **Important:** The runtime base does not add your application, configure your deployment, or grant access to other services. Your team owns the final image, CA trust needed by the application, IAM permissions, network access, and tests.
 
-## Planned languages
+## How images are refreshed
 
-| Language | Versions in the project notes |
-| --- | --- |
-| Python | 3.13 |
-| Go | 1.26 and floating 1 |
-| Node.js | 20 and 24 |
-| Java | 21 and 25 |
-| Rust | 1.90 and floating 1 |
+Each language has its own workflow, scheduled for Monday, Wednesday, and Friday at 02:00 UTC. The shared workflow builds and pushes multi-architecture images to Artifactory, records their digests, and generates a CycloneDX SBOM. A successful run updates the published digest records.
 
-These are planned versions, not a list of available images. .NET is mentioned in the project notes, but its versions and base image have not been decided. The floating Go and Rust versions may change when images are refreshed.
+The workflow scans an AMD64 pull with Wiz. Runtime image findings can fail the build. Builder image findings are informative. A base image scan does not cover your application dependencies or provide a separate ARM64 scan. Scan the final service image and test it on each architecture you use.
 
-## What your team still owns
-
-- Your application code, dependencies, final image, and tests
-- The CA certificates your service needs, including internal CAs where applicable
-- A read-only root filesystem, restricted temporary storage, non-root execution, and other deployment controls
-- IAM permissions, secrets, network access, and application security
-- Compatibility of your application and dependencies with each CPU architecture you deploy
-
-The planned pipeline builds `amd64` and `arm64` bases, scans an AMD64 pull with Wiz, and produces an SBOM and digest record. That scan does not cover the complete service image or establish ARM64 scan coverage. The [Security Contract](docs/SecurityContract.md) explains the requirements and limits. The [Hardening Guide](docs/BaseRuntimeHardeningGuide.md) shows how to apply and check them.
+See the [Security Contract](docs/SecurityContract.md) for the split between image protections and team responsibilities. Use the [Hardening Guide](docs/BaseRuntimeHardeningGuide.md) when building and deploying a service.
