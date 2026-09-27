@@ -1,6 +1,6 @@
 # Runtime hardening guide
 
-Use this guide when building and deploying a service from a published gold runtime image. The [README](../README.md) shows the project status. The [Security Contract](SecurityContract.md) lists the requirements that the service team owns.
+Use this guide when building and deploying a service from a gold runtime image. The [README](../README.md) explains how to find the images. The [Security Contract](SecurityContract.md) lists the requirements that the service team owns.
 
 ## 1. Build the service image
 
@@ -16,7 +16,7 @@ Use this guide when building and deploying a service from a published gold runti
 
 Scan the final image, including dependencies added by your build. Test it on `amd64` and `arm64` if the service will run on both. Native modules and compiled libraries need separate checks on each architecture.
 
-The supplied project notes disagree about whether the base includes a CA bundle. Check the selected image and the trust store used by your runtime. Add the certificates your service needs, including approved internal CAs, in your service build. Keep them read-only. Java uses a JDK trust store, so verify that store and add internal CAs with the appropriate Java tooling. Test TLS against real required endpoints. Do not disable certificate validation.
+Check the selected image and the trust store used by your runtime. Add the certificates your service needs, including approved internal CAs, in your service build. Keep them read-only. Java uses a JDK trust store, so verify that store and add internal CAs with the appropriate Java tooling. Test TLS against the endpoints your service uses. Do not disable certificate validation.
 
 ## 3. Make the root filesystem read-only
 
