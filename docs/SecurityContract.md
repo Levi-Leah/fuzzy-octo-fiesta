@@ -1,49 +1,36 @@
 # Security contract for gold base container images
 
-## Scope and use
+This contract applies to services built from this project's runtime images once they are published. It states what the base is designed to provide and what each service team must do before production use. The [README](../README.md) shows project status. The [Hardening Guide](BaseRuntimeHardeningGuide.md) has implementation steps.
 
-This contract applies when a team builds a service image from a runtime image published by this project. It sets out what the shared base is intended to provide and what the consuming team must implement. Builder images are build-time tools and must not be used as production runtimes. No images or build code are present in this documentation repository yet; these requirements apply when the images become available. See the [project README](../README.md) for status and the [Hardening Guide](BaseRuntimeHardeningGuide.md) for implementation and checks.
+> **Status:** This repository currently contains documentation only. The image properties below describe the intended design. Verify them against the published image when it becomes available.
 
-> **Important:** This repository does not enforce deployment settings or inspect every final service image. Starting from a gold base does not establish compliance. Teams must verify their final image and deployment.
+## What the base provides
 
-## Responsibility split
+The runtime image is designed to contain the language runtime without a normal shell, package manager, compiler, or other builder tools. Its default user is non-root (`65532:65532` in the project notes). Files that the base copies into the runtime stage are intended to be root-owned and not writable by that user.
 
-| Control | Base image / pipeline | Consuming team |
-| --- | --- | --- |
-| Minimal runtime | Produces a language runtime base without builder tools, package manager, or normal shell | Keep the final image free of these tools; do not use a builder image in production |
-| User and files | Runtime base is designed to default to non-root UID/GID `65532:65532`; copied runtime files are intended to be root-owned and read-only | Keep a non-root user; make application files non-writable by that user; test the **final** image |
-| Image identity | Publishes a digest and build evidence, including a CycloneDX SBOM | Pin the full published digest, review refreshes, and scan the complete service image and its dependencies |
-| Root filesystem | Cannot set a deployment's root filesystem read-only | Enable a read-only root filesystem and explicitly mount only the needed writable paths |
-| Temporary files | Does not create a secure runtime mount | Provide a size-limited writable `/tmp` with `noexec`, `nosuid`, and `nodev` where the platform can enforce them |
-| Process isolation | Cannot set deployment security context | Disable privilege escalation, drop all capabilities, and use RuntimeDefault seccomp or stricter |
-| TLS trust | Language runtimes differ; shared and internal CA coverage is not established by these sources | Verify trust for the selected language; provide required CA certificates and test TLS, including internal endpoints |
-| Service access | Does not control service permissions or traffic | Restrict IAM, secrets, inbound access, and outbound destinations |
+The planned pipeline publishes a digest and a CycloneDX SBOM. It builds for `amd64` and `arm64`. The workflow notes describe a Wiz scan of the AMD64 image. They do not establish a separate ARM64 scan or a scan of your final service image.
 
-The intended base-image properties must be checked against the actual published image and its language-specific instructions once available. A service Dockerfile can override the user, add tools, change permissions, or copy unsafe files; the project cannot prevent it.
+These properties apply to the published base as built. Your Dockerfile can override the user, add tools, or change file permissions. Verify the final service image before relying on them.
 
-## Required conditions for production use
+## What the service team must do
 
-The consuming team **must**:
+| Area | Requirement |
+| --- | --- |
+| Image selection | Use the published **runtime** image by its full digest. Do not run a builder image in production. Review new digests before updating. |
+| Final image | Build dependencies in a separate stage. Copy only what the service needs. Do not add a shell, package manager, compiler, debugger, or startup package installation. |
+| User and files | Run as non-root. Keep application files and executables owned by root and not writable by the runtime user. Start the process directly without a shell. |
+| Filesystem | Set a read-only root filesystem. Provide only the writable mounts the service needs. Use a size-limited `/tmp` with `noexec`, `nosuid`, and `nodev` where the platform can enforce those flags. |
+| Process | Disable privilege escalation, drop all Linux capabilities, and apply `RuntimeDefault` seccomp or a stricter approved profile. |
+| Trust | Verify the selected language's CA trust store. Add the public or internal CAs your service needs, and test TLS. |
+| Access | Give the service only the IAM permissions and network access it needs. Keep secrets out of the image. |
+| Application | Test and scan the complete service image. Review application vulnerabilities. Test on every CPU architecture used in production. |
 
-1. Use a published runtime image by digest and retain the matching build record. Update the digest through the team's normal change process.
-2. Build the application in a separate stage. Copy only the executable, application files, runtime dependencies, and trust material that it needs. Do not add a shell, package manager, compiler, or debugger to the production stage. Do not install dependencies at container startup.
-3. Run as a non-root user. Keep executable and application paths owned by root and not writable by the runtime user. Launch the process directly with an exec-form `ENTRYPOINT` or `CMD`, without a shell or production auto-reload mode.
-4. Configure `readOnlyRootFilesystem: true` (or the platform equivalent). Give the application only explicitly required writable mounts. Use a bounded temporary mount for `/tmp` with `noexec`, `nosuid`, and `nodev` **if the platform supports and enforces those mount flags**. Do not claim these flags are active solely because `/tmp` is an in-memory volume.
-5. Set `allowPrivilegeEscalation: false`, drop `ALL` Linux capabilities, and apply `RuntimeDefault` seccomp or a stricter approved profile. Use the equivalent controls on non-Kubernetes platforms and verify them in the deployed workload.
-6. Grant only the IAM permissions the service needs. Scope resources and actions; document and approve any exception requiring broad permissions. Limit egress to required destinations and protect secrets outside the image.
-7. Check application-specific risks, including unsafe deserialization, dynamic code execution, untrusted templates, exposed endpoints, and data access. Test both `amd64` and `arm64` if the service will run on both; base-image support alone does not validate application dependencies.
-8. Scan and test the **final service image**, including added packages and copied application dependencies. Record any exceptions and their owner under the organization's normal review process.
+Use equivalent settings on platforms other than Kubernetes. If a platform cannot enforce a required setting, record the gap and get it reviewed under your normal security exception process. The [Hardening Guide](BaseRuntimeHardeningGuide.md) gives examples and checks.
 
-> **Kubernetes note:** `emptyDir.medium: Memory` provides an in-memory volume but does not by itself set `noexec`, `nosuid`, or `nodev`. Standard Pod volume specs do not expose arbitrary mount options for `emptyDir`. Use an approved platform mechanism that enforces the flags, or document the gap and obtain a security review. See the [mount guidance](BaseRuntimeHardeningGuide.md#4-provide-writable-tmp).
+> **Kubernetes `/tmp` warning:** A memory-backed `emptyDir` alone does not guarantee `noexec`, `nosuid`, or `nodev`. Standard Pod specs have no field to set these mount options on `emptyDir`. Verify an approved platform mechanism before claiming the flags are active.
 
-The exact configuration depends on the orchestrator. The [Hardening Guide](BaseRuntimeHardeningGuide.md#5-set-deployment-process-controls) includes a Kubernetes security context and verification steps. On ECS or another platform, map each requirement to its supported setting rather than copying Kubernetes YAML.
+## Before production release
 
-## Boundaries and exceptions
+The service owner must be able to show the pinned base digest, a scan and tests of the final image, the effective deployment settings, and any approved exceptions. Check ARM64 application compatibility if the service runs on ARM64.
 
-- A read-only application tree is not a read-only root filesystem. The latter is a deployment setting. Writable paths introduced by the service image or by mounts must be reviewed separately.
-- `noexec` limits direct execution from a mount; it does not stop an interpreter from reading a script. Distroless packaging does not eliminate application-level code execution flaws.
-- A runtime image cannot guarantee that application TLS succeeds. Trust stores vary by language and service; see the [trust-store step](BaseRuntimeHardeningGuide.md#3-add-ca-trust-when-needed).
-- The described pipeline scans an AMD64 pull of the base. Its result is not a scan of the ARM64 variant or of your final application image. A 90-day workflow artifact retention period is not a long-term evidence-retention promise.
-- If a service needs extra system libraries or a different runtime behavior, request a change to the shared base or obtain an approved exception. Do not silently weaken the final image or deployment.
-
-Before production release, the service owner should be able to show the pinned digest, final-image scan, deployment settings, application architecture tests where relevant, and approved exceptions. The planned pipeline will supply build evidence; enforcement and approval remain with the organization's deployment and review processes.
+The base cannot protect against vulnerable application code, overly broad IAM, exposed services, or unsafe secrets handling. This repository does not enforce the deployment requirements. Ownership of the final service and its deployment stays with the service team.
