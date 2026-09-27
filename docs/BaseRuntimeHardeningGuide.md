@@ -1,32 +1,30 @@
-# Hardening a service built from a gold runtime image
+# Runtime hardening guide
 
-Use this guide when preparing a service image and its deployment. The [project README](../README.md) gives the project status and explains how to select an image once published. The [Security Contract](SecurityContract.md) defines the required controls and ownership. Confirm language-specific details and the published digest record when they become available.
+Use this guide when building and deploying a service from a published gold runtime image. The [README](../README.md) shows the project status. The [Security Contract](SecurityContract.md) lists the requirements that the service team owns.
 
-## 1. Build a small final image
+## 1. Build the service image
 
-- Pin the builder and runtime images to published digests. Use a builder stage for dependency installation and compilation; keep the final stage on the matching runtime image.
-- Copy only the files required to run the service. Do not copy package managers, shell tools, compiler output caches, credentials, or the full build workspace.
-- Make application code and dependencies root-owned and non-writable by the runtime UID. Check file modes for your actual executable: a binary needs execute permission, while ordinary data files do not.
-- Run the process directly with an exec-form `ENTRYPOINT` or `CMD`. Turn off reload modes, shell hooks, and write-on-start caches. Precompute assets where practical.
-- Retain the runtime image's non-root default, or use another approved non-root UID/GID. Test the user and file access in the **final service image**.
+- Pin the builder and runtime bases to their published digests.
+- Install and compile dependencies in a builder stage. Copy only required application files into the runtime stage.
+- Do not add a shell, package manager, compiler, debugger, credentials, or build caches to the final image.
+- Keep application files owned by root and not writable by the runtime user. Give executables the permissions needed to run.
+- Keep a non-root runtime user. Launch the service directly with an exec-form `ENTRYPOINT` or `CMD`. Turn off hot reload and features that expect a shell.
 
-> **Note:** The project plans to provide base images, not a universal application Dockerfile. The right `COPY`, ownership, and startup command depend on the language and service. A final-stage `USER root` or a copied shell can undo base hardening.
+> **Check:** Inspect and run the **final service image**. Starting from a hardened base does not guarantee that your Dockerfile kept its settings.
 
-## 2. Check architecture and dependencies
+## 2. Check dependencies and CA trust
 
-The base is described as publishing `linux/amd64` and `linux/arm64` variants. Build your service for each architecture you deploy, especially if it uses native modules or compiled libraries. Start each final image on the matching architecture and run service tests. Pin dependency versions and scan the final image; the base-image scan covers neither your added files nor every architecture.
+Scan the final image, including dependencies added by your build. Test it on `amd64` and `arm64` if the service will run on both. Native modules and compiled libraries need separate checks on each architecture.
 
-## 3. Add CA trust when needed
+The supplied project notes disagree about whether the base includes a CA bundle. Check the selected image and the trust store used by your runtime. Add the certificates your service needs, including approved internal CAs, in your service build. Keep them read-only. Java uses a JDK trust store, so verify that store and add internal CAs with the appropriate Java tooling. Test TLS against real required endpoints. Do not disable certificate validation.
 
-Check what trust material is present in your selected language image. The supplied project documents disagree about a shared CA bundle, so do not assume one exists. If your service needs public or internal TLS trust, assemble the necessary certificates in a build stage and copy the resulting trust material into the final image at the location the runtime actually reads. Make it read-only. For Java, inspect the JDK trust store and import approved internal CAs using the supported Java tooling. Verify a TLS connection to each required endpoint in a test deployment.
+## 3. Make the root filesystem read-only
 
-Do not disable certificate validation to make an image work.
+Set `readOnlyRootFilesystem: true` or the equivalent setting on your platform. If the application needs temporary files, provide a separate, size-limited `/tmp` mount. Review every other writable mount. Keep persistent application data outside `/tmp`.
 
-## 4. Provide writable `/tmp`
+Where supported, mount `/tmp` with `noexec`, `nosuid`, and `nodev`. These flags limit direct execution, SUID use, and device files on that mount. They do not stop an interpreter from reading a script.
 
-Run with a read-only root filesystem. Mount `/tmp` as a bounded writable temporary volume if the application needs temporary files. Aim to make it the only writable path, but explicitly review any additional mounts such as logs, sockets, or application data. Do not store data that must survive restarts in `/tmp`.
-
-For a local Docker check, an example is:
+For a local Docker check, replace `IMAGE_REFERENCE` with your final service image:
 
 ```sh
 docker run --rm --read-only \
@@ -35,15 +33,15 @@ docker run --rm --read-only \
   IMAGE_REFERENCE
 ```
 
-Replace `IMAGE_REFERENCE` with the final service image digest. Docker normally applies its default seccomp profile; verify that your host has not disabled it, or select an approved stricter profile. A writable `/tmp` may need a different size or mode for your service.
+Docker normally applies its default seccomp profile. Verify that your host has not disabled it. Adjust the `/tmp` size to the needs of your service.
 
-> **Kubernetes warning:** An `emptyDir` with `medium: Memory` does not provide a Pod-level field for `noexec`, `nosuid`, and `nodev`. Use an approved platform volume or node configuration that actually sets these mount flags and verify the mounted result. If that is unavailable, record the deviation for security review; do not label a plain `emptyDir` as meeting the full mount requirement.
+> **Kubernetes warning:** `emptyDir` with `medium: Memory` provides an in-memory volume, but it does not set `noexec`, `nosuid`, or `nodev` in a Pod spec. Use an approved platform method that enforces the flags and inspect the effective mount. If none is available, record the gap for security review.
 
-With `readOnlyRootFilesystem: true`, a native base-image directory such as `/home/nonroot` is read-only **unless a separate writable volume is mounted there**. Do not add a writable home mount without review. The earlier source material proposed mounting a read-only tmpfs over that path, but it is unnecessary for an ordinary base-layer path under a read-only root and can hide files. Check actual mounts instead.
+A base-image path such as `/home/nonroot` is read-only when the root filesystem is read-only, unless a separate writable volume covers it. Do not add a writable home mount without review.
 
-## 5. Set deployment process controls
+## 4. Set process controls
 
-For Kubernetes, put these settings on the service container. Set the UID/GID to match the selected runtime image; `65532` is the UID/GID described in the project material, and should be checked against the published image.
+On Kubernetes, apply these settings to the **service container**. Check the published image's UID/GID before using the example values:
 
 ```yaml
 securityContext:
@@ -58,19 +56,17 @@ securityContext:
     type: RuntimeDefault
 ```
 
-This fragment belongs under `containers[].securityContext`; it is not a complete Pod manifest. If `/tmp` is needed, add a bounded volume and mount, then handle its mount flags as described in step 4. For ECS and other runtimes, use their equivalent fields for readonly root, non-root identity, capabilities, no-new-privileges where supported, seccomp where supported, and mount controls. Document controls that the platform cannot provide.
+This is a container `securityContext` fragment, not a full Pod manifest. Configure a writable `/tmp` volume separately if the service needs one, then handle its mount flags as described above. On ECS or another platform, use the supported equivalent of each control. Record controls the platform cannot provide.
 
-Restrict the task or workload IAM role to required actions and resources. Limit outbound traffic to required endpoints. Supply secrets through the platform's secret mechanism, not by baking them into the image.
+Limit IAM to required actions and resources. Limit network access to required destinations. Supply secrets through your deployment platform, not the image.
 
-## 6. Verify the final service
+## 5. Verify before release
 
-Before release, check:
+1. Confirm the builder and runtime digest references. Check the final image for unexpected tools and writable application files.
+2. Start the service as a non-root user with a read-only root filesystem. Test a normal request.
+3. Confirm that temporary writes work only on intended mounts. Inspect the effective `/tmp` mount options.
+4. Check the effective UID, capabilities, privilege escalation setting, and seccomp profile in the running workload.
+5. Test TLS, IAM, and required network access. Scan the final image and test each architecture used in production.
+6. Record the final image digest, test results, and approved exceptions.
 
-1. The base reference uses the published digest; the final image has no unexpected tools, files, SUID binaries, or added writable application paths.
-2. The service starts without root or a shell and serves a normal request; it also works with the root filesystem read-only.
-3. Temporary writes succeed only on intended mounts. Inspect effective `/tmp` mount flags on the running platform, rather than relying on manifest text alone.
-4. The running UID, dropped capabilities, privilege escalation setting, and seccomp profile match the contract. Inspect the effective deployment, not only the source manifest.
-5. TLS works with the required public and internal endpoints; the service's IAM and egress rules cover only intended access.
-6. The final image has been scanned and tested on every architecture used in production. Record the digest, result, and approved exceptions.
-
-Production images need not gain a shell for debugging. Reproduce issues in a separate debug environment or use platform-supported inspection while keeping the shipped image unchanged.
+Keep production images free of a shell. Use a separate debug environment or platform inspection tools when investigating a problem.
