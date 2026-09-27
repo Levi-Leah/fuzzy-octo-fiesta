@@ -1,36 +1,34 @@
 # Security contract for gold base container images
 
-This contract applies to services built from this project's runtime images once they are published. It states what the base is designed to provide and what each service team must do before production use. The [README](../README.md) shows project status. The [Hardening Guide](BaseRuntimeHardeningGuide.md) has implementation steps.
+This contract applies to application teams that use a gold runtime image. It separates what the base image provides from what the service team must provide. The [README](../README.md) explains image selection. The [Hardening Guide](BaseRuntimeHardeningGuide.md) covers implementation and verification.
 
-> **Status:** This repository currently contains documentation only. The image properties below describe the intended design. Verify them against the published image when it becomes available.
+## Provided by the runtime base
 
-## What the base provides
+- A small distroless runtime without the builder's compiler, package manager, and normal shell tools
+- A non-root default user (`65532:65532` in the shared runtime design)
+- Read-only, root-owned files that the base build copies into the runtime image
+- A published image digest and build evidence, including a CycloneDX SBOM
 
-The runtime image is designed to contain the language runtime without a normal shell, package manager, compiler, or other builder tools. Its default user is non-root (`65532:65532` in the project notes). Files that the base copies into the runtime stage are intended to be root-owned and not writable by that user.
+These protections cover the base image as published. They do not make the whole container filesystem read-only. A service Dockerfile can also remove them by changing the user, file permissions, or image contents.
 
-The planned pipeline publishes a digest and a CycloneDX SBOM. It builds for `amd64` and `arm64`. The workflow notes describe a Wiz scan of the AMD64 image. They do not establish a separate ARM64 scan or a scan of your final service image.
-
-These properties apply to the published base as built. Your Dockerfile can override the user, add tools, or change file permissions. Verify the final service image before relying on them.
-
-## What the service team must do
+## Required from the service team
 
 | Area | Requirement |
 | --- | --- |
-| Image selection | Use the published **runtime** image by its full digest. Do not run a builder image in production. Review new digests before updating. |
-| Final image | Build dependencies in a separate stage. Copy only what the service needs. Do not add a shell, package manager, compiler, debugger, or startup package installation. |
-| User and files | Run as non-root. Keep application files and executables owned by root and not writable by the runtime user. Start the process directly without a shell. |
+| Image | Use the published runtime image by digest. Build dependencies separately and keep shells, package managers, compilers, and debuggers out of the final image. |
+| User and files | Run as non-root. Keep application files and executables root-owned and not writable by the runtime user. Start the application directly, without a shell. |
 | Filesystem | Set a read-only root filesystem. Provide only the writable mounts the service needs. Use a size-limited `/tmp` with `noexec`, `nosuid`, and `nodev` where the platform can enforce those flags. |
-| Process | Disable privilege escalation, drop all Linux capabilities, and apply `RuntimeDefault` seccomp or a stricter approved profile. |
-| Trust | Verify the selected language's CA trust store. Add the public or internal CAs your service needs, and test TLS. |
-| Access | Give the service only the IAM permissions and network access it needs. Keep secrets out of the image. |
-| Application | Test and scan the complete service image. Review application vulnerabilities. Test on every CPU architecture used in production. |
+| Process | Disable privilege escalation, drop all Linux capabilities, and use RuntimeDefault seccomp or an approved stricter profile. |
+| Trust | Provide and test the CA trust your application needs, including internal CAs. Check the selected language's trust store. |
+| Access | Limit IAM permissions and outbound traffic to what the service needs. Keep secrets out of the image. |
+| Application | Review application security risks. Scan and test the complete service image. Test on every CPU architecture used in production. |
 
-Use equivalent settings on platforms other than Kubernetes. If a platform cannot enforce a required setting, record the gap and get it reviewed under your normal security exception process. The [Hardening Guide](BaseRuntimeHardeningGuide.md) gives examples and checks.
+The runtime image cannot set deployment controls on its own. Configure them in your orchestrator and check the effective workload. See the [Hardening Guide](BaseRuntimeHardeningGuide.md) for an example security context and a release checklist.
 
-> **Kubernetes `/tmp` warning:** A memory-backed `emptyDir` alone does not guarantee `noexec`, `nosuid`, or `nodev`. Standard Pod specs have no field to set these mount options on `emptyDir`. Verify an approved platform mechanism before claiming the flags are active.
+> **Kubernetes `/tmp` note:** A memory-backed `emptyDir` alone does not guarantee the `noexec`, `nosuid`, or `nodev` mount flags. Verify that your platform enforces them. If it cannot, document the gap and seek a security review.
 
-## Before production release
+## Limits and release evidence
 
-The service owner must be able to show the pinned base digest, a scan and tests of the final image, the effective deployment settings, and any approved exceptions. Check ARM64 application compatibility if the service runs on ARM64.
+The base cannot fix unsafe application code, broad IAM permissions, exposed services, or secrets handling. The workflow scans an AMD64 pull of the base image. This does not cover the ARM64 variant or your final service image.
 
-The base cannot protect against vulnerable application code, overly broad IAM, exposed services, or unsafe secrets handling. This repository does not enforce the deployment requirements. Ownership of the final service and its deployment stays with the service team.
+Before release, the service owner should be able to show the pinned base digest, final image scan, application tests, deployment settings, and approved exceptions. This repository does not enforce deployment settings. The service team remains responsible for its final image and workload.
