@@ -16,6 +16,12 @@ The shared images give services a consistent, smaller production base. They are 
 
 .NET versions and its runtime base are still undecided. Use the published digest records to confirm which images can be pulled. Java's upstream base is not pinned by digest.
 
+## Guides for application teams
+
+- [Onboarding guide](docs/guides/OnboardingGuide.md) — use gold images for a new service.
+- [Migration guide](docs/guides/MigrationGuide.md) — move an existing service to gold images.
+- [Istio startup checks](docs/guides/IstioStartup.md) — optional checks for services using Istio.
+
 ## Use an image
 
 1. Choose a language and version. Read that language's `README.md` for its build and startup details.
