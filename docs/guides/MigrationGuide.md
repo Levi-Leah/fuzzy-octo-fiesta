@@ -27,7 +27,7 @@ Before changing the image:
 3. Copy both full image references with their `sha256` digests.
 4. Check the cluster CPU architecture and any native dependencies.
 
-Use the **published image catalog**, not a README version list, to confirm availability. Digest pinning identifies the base image used in a given build.
+Use the **published image catalog or Artifactory**, not a README version list alone, to confirm availability. Digest pinning identifies the base image used in a given build.
 
 ## 3. Update the Dockerfile
 
