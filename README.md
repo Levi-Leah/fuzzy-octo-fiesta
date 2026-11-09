@@ -22,6 +22,7 @@ These are the versions listed in the latest supplied source README. Confirm actu
 - [Onboarding guide](docs/guides/OnboardingGuide.md) — use gold images for a new service.
 - [Migration guide](docs/guides/MigrationGuide.md) — move an existing service to gold images.
 - [Istio startup checks](docs/guides/IstioStartup.md) — optional checks for services using Istio.
+- [Deployment tracking](docs/guides/DeploymentTracking.md) — optional registration after a successful rollout.
 
 ## Use an image
 
