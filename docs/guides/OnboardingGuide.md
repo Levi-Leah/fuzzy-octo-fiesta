@@ -80,6 +80,8 @@ args: ["prepare && start"]
 
 Use a direct executable instead, or keep the image's default startup command if it is correct. For example, Python can run a *module* with `python3 -m ...` when the interpreter and module exist in the image. A virtualenv console script can also work if its shebang and interpreter are valid; **test it** rather than assuming.
 
+**Startup dependencies:** If the application calls a database, cache, or external API before becoming ready, make sure it handles a temporary connection failure. Use retries and readiness checks rather than depending on an incidental startup delay. This applies with or without a service mesh.
+
 Before deployment, confirm that TLS connections work:
 
 - **Python, Node.js, Go, Rust:** Provide the CA certificates needed by your application, using the path and settings expected by your runtime.
@@ -138,6 +140,7 @@ If the application makes network requests **during startup** in an Istio-injecte
 ## References
 
 - [Repository overview](../../README.md)
+- [Image publishing and supply-chain boundaries](../ImagePublishing.md)
 - [Migration guide](MigrationGuide.md)
 - [Security Contract](../SecurityContract.md)
 - [Runtime Hardening Guide](../BaseRuntimeHardeningGuide.md)
