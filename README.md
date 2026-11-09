@@ -13,8 +13,9 @@ The shared images give services a consistent, smaller production base. They are 
 | Node.js | 20, 24 | Distroless | `pnpm` is in the builder only |
 | Java | 21, 25 | Distroless | Maven 3 is in the builder. Java uses the JDK trust store |
 | Rust | 1.90, 1 | Distroless static | The builder targets `musl`. `1` tracks the current Rust 1 release |
+| .NET | 10 | Chiseled Ubuntu .NET runtime | Non-root UID/GID 1654; check published image details |
 
-.NET versions and its runtime base are still undecided. Use the published digest records to confirm which images can be pulled. Java's upstream base is not pinned by digest.
+These are the versions listed in the latest supplied source README. Confirm actual availability in the published image catalog or Artifactory before using one. Java's upstream base is described as not digest-pinned.
 
 ## Guides for application teams
 
@@ -25,7 +26,7 @@ The shared images give services a consistent, smaller production base. They are 
 ## Use an image
 
 1. Choose a language and version. Read that language's `README.md` for its build and startup details.
-2. Find the builder and runtime image digests in the language's `records/gold-digests.json` or the Gold Base Image Digests table. Use the full published registry reference and digest in your Dockerfile. A digest fixes the exact image version you build from.
+2. Find the builder and runtime image digests in the published Gold Base Image Digests page or Artifactory. Use the full published registry reference and digest in your Dockerfile. A digest fixes the exact image version you build from.
 3. Build your application and dependencies with the builder image. Copy only the required application files into a final stage based on the runtime image.
 4. Scan and test the final service image. Apply the deployment controls in the [Security Contract](docs/SecurityContract.md). The [Hardening Guide](docs/BaseRuntimeHardeningGuide.md) shows how to implement and verify them.
 
@@ -35,7 +36,7 @@ For pipeline scope, publishing evidence, and the difference between base-image s
 
 ## How images are refreshed
 
-Each language has its own workflow, scheduled for Monday, Wednesday, and Friday at 02:00 UTC. The shared workflow builds and pushes multi-architecture images to Artifactory, records their digests, and generates a CycloneDX SBOM. A successful run updates the published digest records.
+Each language has its own refresh workflow, scheduled for **Monday at 02:00 UTC** according to the latest source README. The shared workflow builds and pushes multi-architecture images to Artifactory, records their digests, and generates a CycloneDX SBOM. A successful run updates the published digest records.
 
 The workflow scans an AMD64 pull with Wiz. Runtime image findings can fail the build. Builder image findings are informative. A base image scan does not cover your application dependencies or provide a separate ARM64 scan. Scan the final service image and test it on each architecture you use.
 
