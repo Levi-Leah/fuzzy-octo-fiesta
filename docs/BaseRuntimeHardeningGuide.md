@@ -60,6 +60,12 @@ This is a container `securityContext` fragment, not a full Pod manifest. Configu
 
 Limit IAM to required actions and resources. Limit network access to required destinations. Supply secrets through your deployment platform, not the image.
 
+## Avoid runtime development tools and shell hooks
+
+Disable development hot reload and file-watching modes in production. Review build scripts, package lifecycle hooks, pre-start steps, and commands launched by the application: they must not assume a shell or builder-only tool exists at runtime.
+
+For debugging, do not add a shell to the production image. Use platform logs and inspection tools or a separate approved debug environment. When checking file ownership or the effective user, **run the final production image**; a development image started with the same numeric UID is not an equivalent test.
+
 ## 5. Verify before release
 
 1. Confirm the builder and runtime digest references. Check the final image for unexpected tools and writable application files.
