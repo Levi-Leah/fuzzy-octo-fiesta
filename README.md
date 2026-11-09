@@ -31,6 +31,8 @@ The shared images give services a consistent, smaller production base. They are 
 
 > **Important:** The runtime base does not add your application, configure your deployment, or grant access to other services. Your team owns the final image, CA trust needed by the application, IAM permissions, network access, and tests.
 
+For pipeline scope, publishing evidence, and the difference between base-image scans and application scans, see [Image publishing and supply-chain boundaries](docs/ImagePublishing.md).
+
 ## How images are refreshed
 
 Each language has its own workflow, scheduled for Monday, Wednesday, and Friday at 02:00 UTC. The shared workflow builds and pushes multi-architecture images to Artifactory, records their digests, and generates a CycloneDX SBOM. A successful run updates the published digest records.
