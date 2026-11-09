@@ -37,11 +37,11 @@ Docker normally applies its default seccomp profile. Verify that your host has n
 
 > **Kubernetes warning:** `emptyDir` with `medium: Memory` provides an in-memory volume, but it does not set `noexec`, `nosuid`, or `nodev` in a Pod spec. Use an approved platform method that enforces the flags and inspect the effective mount. If none is available, record the gap for security review.
 
-A base-image path such as `/home/nonroot` is read-only when the root filesystem is read-only, unless a separate writable volume covers it. Do not add a writable home mount without review.
+**About `/home/nonroot`:** On distroless `:nonroot` images, this home directory may be owned by the non-root user. With `readOnlyRootFilesystem: true` (or Docker `--read-only`), an ordinary home directory in the image's root filesystem is **not writable**. A separate writable mount over it would change that. Check the actual mounts; do not add a home-directory overlay just because the directory is owned by the runtime user. An additional overlay may be a defense-in-depth choice, not a universal requirement.
 
 ## 4. Set process controls
 
-On Kubernetes, apply these settings to the **service container**. Check the published image's UID/GID before using the example values:
+On Kubernetes, apply these settings to the **service container**. The fragment below uses the distroless example identity (`65532`); the documented .NET chiseled runtime uses `1654`. Verify the published image's identity before deploying:
 
 ```yaml
 securityContext:
