@@ -1,37 +1,27 @@
 # Migration: Move an existing service to gold images
 
-Use this guide when an application already runs on another container image. The [onboarding guide](OnboardingGuide.md) explains gold builder/runtime images and the standard Dockerfile pattern.
+Use this guide to move an existing service onto gold images. For the standard two-stage Dockerfile pattern, see [Onboarding](OnboardingGuide.md#2-create-your-dockerfile).
 
 ## 1. Prepare a rollback
 
 Before editing the service:
 
-1. Save the current image digest, Dockerfile, and deployment configuration.
-2. Record the existing startup command, writable paths, native dependencies, CA certificates, and external services.
-3. Identify startup jobs such as database migrations and determine whether the previous release can run after they complete.
-4. Confirm your team's rollback method.
+1. Save the current image and deployment configuration.
+2. Check startup commands, writable paths, certificates, native dependencies, and external services.
+3. Identify database migrations or other changes that an image rollback would not reverse.
 
 > [!WARNING]
 > Reverting the application image does not undo a database schema migration or another external change.
 
 ## 2. Replace the base images
 
-1. Select published builder and runtime digests from [TODO: gold image catalog].
-2. Confirm the target `amd64`/`arm64` architecture and application dependency compatibility.
-3. Replace the Dockerfile's build stage with the gold builder. Install dependencies and compile the application there.
-4. Replace the final stage with the gold runtime. Copy only the required output, keep it root-owned/non-writable, and preserve the runtime's non-root user.
+1. Select published builder/runtime digests from [TODO: gold image catalog]; check target architectures.
+2. Build dependencies and application artifacts with the gold builder.
+3. Copy only runtime artifacts into the gold runtime, keeping files non-writable by its non-root user.
 
 ```sh
-# Replace the placeholders with the published reference.
-docker manifest inspect REGISTRY/RUNTIME@sha256:RUNTIME_DIGEST
-
-# Run from the service repository after editing its Dockerfile.
 docker build --pull -t gold-service:migration-test .
-docker image inspect gold-service:migration-test --format '{{.Config.User}}'
-docker image inspect gold-service:migration-test --format '{{json .Config.Entrypoint}} {{json .Config.Cmd}}'
 ```
-
-For the Dockerfile layout, see [Onboarding: Create your Dockerfile](OnboardingGuide.md#2-create-your-dockerfile). For language-specific instructions, see [TODO: language READMEs].
 
 > [!WARNING]
 > Do not restore compatibility by adding a shell, package manager, build tools, or extra privileges to the production image.
@@ -47,27 +37,24 @@ command: ["/bin/sh", "-c"]
 args: ["npx prisma migrate deploy && node index.js"]
 ```
 
-Start the installed executable or interpreter directly. If the service needs multiple startup actions, use an application entrypoint that handles their failures or an appropriate separate deployment task. For Python, `python3 -m uvicorn ...` may be suitable when that interpreter and module exist; a virtualenv console script is not automatically incompatible.
+Invoke the interpreter or binary directly. For multi-step startup, use an application entrypoint or separate task (for example, a database migration Job).
 
 **Check startup timing:** Removing a shell wrapper can change when the first database, cache, or API connection happens. Verify readiness, retries, and timeouts instead of assuming the external service will already be available.
 
-> [!IMPORTANT]
-> Use the executable paths supplied by the **selected image**; do not assume every language uses the same paths. [TODO: runtime command reference]
+See [TODO: language READMEs] for supported executable paths.
 
 ## 4. Check runtime compatibility
 
-Review the following only for changes introduced by the new runtime:
+Check for incompatibilities introduced by the new runtime:
 
-- **File writes and identity:** Check the effective runtime UID, application permissions, caches, and temporary directories. The documented distroless UID/GID is `65532`; .NET chiseled uses `1654`.
-- **TLS:** Test real connections with the required CA certificates. Java uses its JDK trust store. Never disable certificate verification to resolve a failure.
-- **Native libraries:** Check compiled modules and binaries on each architecture used by the service.
-- **Networking:** Confirm DNS, IAM permissions, secrets, egress policy, and access to external dependencies. Normal DNS configuration belongs to the container platform, not a baked-in `/etc/resolv.conf`.
+- **Filesystem:** Root-owned application files, writable temporary paths, and effective UID (`65532` for distroless, `1654` for .NET chiseled).
+- **TLS:** Required CA certificates (Java uses its JDK trust store).
+- **Architecture:** Compiled binaries and native dependencies on every target architecture.
+- **Networking:** DNS, IAM, secrets, and egress permissions.
 
 ## 5. Apply deployment controls
 
-Use the [Security Contract](../SecurityContract.md) and [Hardening Guide](../BaseRuntimeHardeningGuide.md) to set the required non-root identity, read-only filesystem, dropped capabilities, no privilege escalation, and seccomp profile.
-
-Confirm that any `/tmp` mount has the required restrictions; an ordinary Kubernetes memory-backed `emptyDir` does not establish all mount flags.
+Apply the [Security Contract](../SecurityContract.md) and [Hardening Guide](../BaseRuntimeHardeningGuide.md), including read-only root filesystem, process restrictions, and `/tmp` mount requirements.
 
 ## 6. Test and roll out
 
@@ -80,21 +67,22 @@ docker run --rm --read-only \
   gold-service:migration-test
 ```
 
-In staging, test startup and restarts, application requests, external dependencies, and the effective security settings. Scan the final image. Then release gradually if your deployment system supports it.
+Scan the final image; test startup, external dependencies, and deployment security settings in staging. Roll out gradually where supported.
 
-For Kubernetes, replace the example names with your Deployment and namespace:
+For Kubernetes:
 
 ```sh
 kubectl rollout status deployment/DEPLOYMENT -n NAMESPACE
-kubectl get pods -n NAMESPACE
 kubectl logs deployment/DEPLOYMENT -n NAMESPACE --all-containers=true --tail=100
 ```
 
-Watch health checks, restarts, connection errors, and application logs before completing the rollout.
+Check readiness, restarts, and connection errors before proceeding.
 
-After a successful deployment, you may [register the deployment](DeploymentTracking.md) if your team uses the shared inventory.
+## 7. Register the deployment
 
-## 7. Roll back if the rollout fails
+After a successful rollout, add the [deployment registration job](OnboardingGuide.md#6-register-the-deployment) to the service's workflow. Register the application and gold-image digests for each deployed workload and verify the inventory entry.
+
+## 8. Roll back if the rollout fails
 
 Restore the previously saved image **and matching deployment configuration** through your release process. For a Kubernetes Deployment with usable rollout history:
 
@@ -104,7 +92,7 @@ kubectl rollout status deployment/DEPLOYMENT -n NAMESPACE
 ```
 
 > [!WARNING]
-> A GitOps controller may restore the currently declared state. Confirm database/schema compatibility and follow the team's rollback procedure before using this command.
+> GitOps may reapply the declared state. Check database compatibility before rolling back.
 
 ## Troubleshooting
 
