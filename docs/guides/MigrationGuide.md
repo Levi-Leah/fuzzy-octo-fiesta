@@ -13,8 +13,10 @@ Before changing the image:
 1. Record the current application image digest and deployment configuration.
 2. Save the existing Dockerfile and startup command.
 3. List all runtime dependencies, including native libraries, certificates, writable directories, and external services.
-4. Note any commands run at startup, such as database migrations or cache warm-up.
+4. Note any commands run at startup, such as database migrations or cache warm-up. Record which external services must be reachable before the application is ready.
 5. Confirm how to restore the existing release.
+
+**General startup lesson:** Replacing a shell wrapper or package-manager command can change how quickly the application reaches its first network request. A successful deployment may therefore expose an existing dependency race. Check readiness and retries even when you do **not** use Istio.
 
 **Do not skip rollback preparation.** Rolling back the image may not undo a database schema change.
 
@@ -72,6 +74,13 @@ For Python, a direct command such as `python3 -m uvicorn ...` may be appropriate
 - Move legitimate temporary writes to approved writable mounts; disable unnecessary caches.
 - Verify the selected runtime UID/GID. The supplied `:nonroot` images use **65532**, while the .NET chiseled image description uses **1654**.
 
+### Startup dependencies and external access
+
+- Check whether the application contacts databases, caches, or external APIs during startup.
+- Confirm when those destinations become available. Do not use a delay caused by a shell wrapper or package manager as a readiness mechanism.
+- Use appropriate dependency retries, timeouts, and readiness checks. A reachable database is not necessarily ready at the instant the app starts.
+- Consider moving one-time database migrations into a separate controlled deployment step, where appropriate. Rollback and schema compatibility still need planning.
+
 ### Certificates and external access
 
 - Verify TLS against required endpoints. Supply CA certificates where needed.
@@ -123,7 +132,7 @@ Do not work around failures by permanently running as root, adding a shell, or d
 | TLS / unknown CA error | Correct certificates and language-specific trust store |
 | Works on AMD64 but fails on ARM64 | Native dependencies or binary architecture |
 | DNS failure | Runtime DNS configuration and service discovery |
-| External connection fails only at startup in Istio | Follow [Istio startup checks](IstioStartup.md) |
+| External connection fails during startup | Check dependency readiness, network policies, and retry/timeout handling; see [Istio startup checks](IstioStartup.md) **only if using Istio** |
 
 ## Migration checklist
 
@@ -134,7 +143,7 @@ Do not work around failures by permanently running as root, adding a shell, or d
 - [ ] Permissions, UID, writable paths, and CA trust tested.
 - [ ] IAM, network access, DNS, secrets, and CPU architecture checked.
 - [ ] Security Contract requirements verified.
-- [ ] Startup integrations tested, including Istio **only if used**.
+- [ ] Startup dependencies and readiness/retry behavior tested; Istio checks completed **only if used**.
 - [ ] Final image scanned, staged rollout monitored, and evidence recorded.
 
 ## References
@@ -144,4 +153,5 @@ Do not work around failures by permanently running as root, adding a shell, or d
 - [Security Contract](../SecurityContract.md)
 - [Runtime Hardening Guide](../BaseRuntimeHardeningGuide.md)
 - [Repository overview](../../README.md)
+- [Image publishing and supply-chain boundaries](../ImagePublishing.md)
 - Relevant language README and published image catalog
