@@ -17,7 +17,7 @@ The pipeline described in the source documentation:
 5. Generates a CycloneDX software bill of materials (SBOM).
 6. Records image digest metadata and, where available, attaches build, SBOM, and scan evidence.
 
-The source describes runtime-image scanning as stricter than builder-image scanning. It also describes language refresh workflows scheduled on Monday, Wednesday, and Friday at 02:00 UTC.
+The source describes runtime-image scanning as stricter than builder-image scanning. The **latest** source README lists language refresh workflows scheduled on **Monday at 02:00 UTC**. The previous source version listed Monday, Wednesday, and Friday; use the live workflow configuration to confirm the effective schedule.
 
 **Check the current pipeline before relying on any of these details.** The supplied language READMEs describe earlier phases in which some publishing, scanning, and signing features were planned rather than complete.
 
@@ -49,7 +49,7 @@ See the [Security Contract](SecurityContract.md) and [Hardening Guide](BaseRunti
 
 ## Source and verification
 
-- Source: `Levi-Leah/ollololololo/README-v2.md` (detailed publishing description).
+- Sources: `Levi-Leah/ollololololo/README-v2.md` (detailed publishing description) and the later README screenshots supplied for this review (version and schedule changes).
 - The language README screenshots provided for this documentation also describe planned states and historical workflows.
 - For operational decisions, use the actual workflow configuration, image catalog, and current run evidence.
 
