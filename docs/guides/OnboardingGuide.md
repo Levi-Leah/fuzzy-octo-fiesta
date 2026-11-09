@@ -64,7 +64,7 @@ Do not rely on `RUN chmod ...` in a shell-free final stage. Set file permissions
 | Rust | Build for the appropriate musl target | Binary architecture, static linking, CA certificates |
 | .NET | Publish with the .NET SDK | Chiseled runtime compatibility and non-root UID |
 
-The supplied language notes identify UID/GID **65532** for the distroless `:nonroot` families and **1654** for the .NET chiseled image. **Check the published image**, rather than applying either value to every service. Available versions and published images must also be checked in the catalog.
+The latest supplied source README includes **.NET 10** with a chiseled runtime. The language notes identify UID/GID **65532** for the distroless `:nonroot` families and **1654** for .NET. **Check the published image**, rather than applying either value to every service. Available versions and published images must also be checked in the catalog or Artifactory.
 
 For language-specific build commands, use the relevant language README. This guide does not assume every application has the same project layout or entrypoint.
 
