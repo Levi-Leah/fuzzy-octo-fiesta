@@ -20,7 +20,8 @@ Before you start, make sure you have:
 - A way to build, scan, and test your final application image.
 - Access to the deployment configuration (for example, Kubernetes or ECS).
 
-**Important:** A version mentioned in a README may not have a published image. Use the current image catalog to check availability.
+> [!IMPORTANT]
+> A version listed in a README may not have a published image. Confirm the image in the current catalog before proceeding.
 
 ## 2. Choose and pin the images
 
@@ -29,29 +30,59 @@ Before you start, make sure you have:
 3. Check that the image supports the CPU architecture used by your cluster (for example, `amd64` or `arm64`).
 4. Save the chosen digests with your release information.
 
-Your Dockerfile will use the published references in two stages:
+You can inspect a published image with Docker (replace the example reference):
 
-```dockerfile
-# Example only: replace both placeholders with published references.
-FROM <builder-image>@sha256:<builder-digest> AS build
-# Install dependencies and build the application here.
-
-FROM <runtime-image>@sha256:<runtime-digest>
-# Copy only the files needed at runtime.
+```sh
+docker manifest inspect REGISTRY/IMAGE@sha256:DIGEST
 ```
 
-This example is **not runnable** until you replace the placeholders and add your application's build and startup instructions.
+> [!IMPORTANT]
+> `REGISTRY/IMAGE@sha256:DIGEST` is a placeholder, not a working image. Follow your registry's authentication instructions: [TODO: link to registry access guide].
 
-## 3. Build the final application image
+## 3. Create and build the service image
 
-1. In the **builder** stage, install dependencies and build the application. Use your language's lockfile where available.
-2. In the **runtime** stage, copy only the compiled application and files it needs to run.
-3. Keep shells, package managers, build tools, credentials, and build caches out of the runtime image.
-4. Keep application files owned by root and not writable by the runtime user. Make executable files executable.
-5. Preserve the image's non-root user; check the selected image before setting a numeric UID.
-6. Start the application directly with an exec-form `CMD` or `ENTRYPOINT`. Use the interpreter or binary path that exists in the **selected image**.
+Complete these steps in your **application repository**, not in the gold-image repository.
 
-Do not rely on `RUN chmod ...` in a shell-free final stage. Set file permissions in a tool-enabled build stage or use suitable `COPY --chown` and `COPY --chmod` options.
+### 3.1 Build your application in a builder stage
+
+Start the Dockerfile with the **published builder image**. Install dependencies, compile or package the service, and keep its dependency lockfile in use.
+
+```dockerfile
+# Illustration only — use your published image reference.
+FROM REGISTRY/BUILDER@sha256:BUILDER_DIGEST AS build
+WORKDIR /app
+# Copy source and lockfiles, then use your language's documented build commands.
+```
+
+Use the [language build instructions](#language-notes) for the actual commands.
+
+### 3.2 Copy the result into the runtime stage
+
+Add the production runtime stage. Copy only the output needed to run the service. The location below is illustrative: adjust it to your application's real build output.
+
+```dockerfile
+FROM REGISTRY/RUNTIME@sha256:RUNTIME_DIGEST
+WORKDIR /app
+COPY --from=build --chown=0:0 --chmod=0555 /app/OUTPUT_DIRECTORY /app/OUTPUT_DIRECTORY
+# Set an exec-form CMD or ENTRYPOINT for your actual executable.
+```
+
+Use file and directory permissions appropriate to the artifact: executable binaries need execute permission; non-executable files normally only need read permission. Preserve the image's default non-root user, unless the published image guidance requires an override.
+
+> [!WARNING]
+> Do **not** copy the entire builder stage into production or add a shell, package manager, compiler, credentials, or build caches. Do not assume `RUN chmod` works in a shell-free final stage: set permissions in the builder or use `COPY --chown` / `COPY --chmod`.
+
+### 3.3 Build and inspect the final image
+
+Run from the directory containing your service Dockerfile:
+
+```sh
+docker build --pull -t gold-service:test .
+docker image inspect gold-service:test --format '{{.Config.User}}'
+docker image inspect gold-service:test --format '{{json .Config.Entrypoint}} {{json .Config.Cmd}}'
+```
+
+Confirm the runtime user and startup command match the selected gold image and your application. These commands inspect metadata; they do **not** verify every file permission or deployment setting. Follow the [Hardening Guide](../BaseRuntimeHardeningGuide.md) for full checks.
 
 ### Language notes
 
@@ -70,7 +101,8 @@ For language-specific build commands, use the relevant language README. This gui
 
 ## 4. Configure startup and certificates
 
-The runtime has no shell. Do not use shell-based startup commands such as:
+> [!WARNING]
+> The runtime has no shell. Do not use shell-based startup commands such as:
 
 ```yaml
 # This requires /bin/sh and will not work in a shell-free runtime.
@@ -88,7 +120,8 @@ Before deployment, confirm that TLS connections work:
 - **Java:** Check the built-in JDK trust store; import internal CAs there if required.
 - **.NET:** Verify the selected chiseled image's trust-store behavior.
 
-Do not disable certificate verification to work around an error.
+> [!WARNING]
+> Do not disable certificate verification to work around a TLS error.
 
 ## 5. Secure the deployment
 
@@ -118,6 +151,19 @@ Also:
 
 ## 6. Test before release
 
+Run the final application image with a read-only root filesystem. The example below provides a restricted temporary directory and assumes the image's configured entrypoint is runnable:
+
+```sh
+docker run --rm --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=128m,mode=1777 \
+  --cap-drop=ALL --security-opt=no-new-privileges \
+  gold-service:test
+```
+
+If your service needs ports, environment variables, secrets, or external dependencies, configure them through your approved local test setup. Never put real secrets directly in the shell command.
+
+
+
 1. Build and scan the **final application image**, not only the gold base.
 2. Run it with its real startup command, non-root user, and read-only root filesystem.
 3. Check application startup, a normal request, and shutdown.
@@ -127,6 +173,8 @@ Also:
 7. Record the final image digest, test results, and approved exceptions.
 
 If the application makes network requests **during startup** in an Istio-injected namespace, also read [Istio startup checks](IstioStartup.md). Other workloads can skip that guide.
+
+After a successful deployment, teams using the shared inventory can follow [Register a deployment](DeploymentTracking.md). This is optional and does not replace validation.
 
 ## Ready-to-release checklist
 
@@ -144,4 +192,5 @@ If the application makes network requests **during startup** in an Istio-injecte
 - [Migration guide](MigrationGuide.md)
 - [Security Contract](../SecurityContract.md)
 - [Runtime Hardening Guide](../BaseRuntimeHardeningGuide.md)
-- Relevant language README and published image catalog
+- [Optional deployment tracking](DeploymentTracking.md)
+- [TODO: language-specific README links and published image catalog]
