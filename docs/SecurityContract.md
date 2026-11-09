@@ -27,6 +27,12 @@ The runtime image cannot set deployment controls on its own. Configure them in y
 
 > **Kubernetes `/tmp` note:** A memory-backed `emptyDir` alone does not guarantee the `noexec`, `nosuid`, or `nodev` mount flags. Verify that your platform enforces them. If it cannot, document the gap and seek a security review.
 
+## Application security and network access
+
+A minimal runtime reduces the tools available to a compromised process, but **does not fix application vulnerabilities**. Service teams must review unsafe deserialization, dynamic code execution, template injection, and other language-level remote code execution paths.
+
+Allow only required outbound connections. Restrict cloud IAM to the actions and resources the service uses; avoid broad wildcard permissions. A compromised application inherits its workload credentials and permitted network reach.
+
 ## Limits and release evidence
 
 The base cannot fix unsafe application code, broad IAM permissions, exposed services, or secrets handling. The workflow scans an AMD64 pull of the base image. This does not cover the ARM64 variant or your final service image.
