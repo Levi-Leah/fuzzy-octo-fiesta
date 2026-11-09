@@ -4,8 +4,8 @@ This contract applies to application teams that use a gold runtime image. It sep
 
 ## Provided by the runtime base
 
-- A small distroless runtime without the builder's compiler, package manager, and normal shell tools
-- A non-root default user (`65532:65532` in the shared runtime design)
+- A minimal runtime without the builder's compiler, package manager, and normal shell tools (distroless for most languages; chiseled for .NET)
+- A non-root default user (typically `65532:65532` for the described distroless images; `1654:1654` for the described .NET chiseled image)
 - Read-only, root-owned files that the base build copies into the runtime image
 - A published image digest and build evidence, including a CycloneDX SBOM
 
@@ -23,9 +23,15 @@ These protections cover the base image as published. They do not make the whole 
 | Access | Limit IAM permissions and outbound traffic to what the service needs. Keep secrets out of the image. |
 | Application | Review application security risks. Scan and test the complete service image. Test on every CPU architecture used in production. |
 
-The runtime image cannot set deployment controls on its own. Configure them in your orchestrator and check the effective workload. See the [Hardening Guide](BaseRuntimeHardeningGuide.md) for an example security context and a release checklist.
+The runtime image cannot set deployment controls on its own. The published image's actual user and trust store must be checked before deployment. Configure them in your orchestrator and check the effective workload. See the [Hardening Guide](BaseRuntimeHardeningGuide.md) for an example security context and a release checklist.
 
 > **Kubernetes `/tmp` note:** A memory-backed `emptyDir` alone does not guarantee the `noexec`, `nosuid`, or `nodev` mount flags. Verify that your platform enforces them. If it cannot, document the gap and seek a security review.
+
+## Application security and network access
+
+A minimal runtime reduces the tools available to a compromised process, but **does not fix application vulnerabilities**. Service teams must review unsafe deserialization, dynamic code execution, template injection, and other language-level remote code execution paths.
+
+Allow only required outbound connections. Restrict cloud IAM to the actions and resources the service uses; avoid broad wildcard permissions. A compromised application inherits its workload credentials and permitted network reach.
 
 ## Limits and release evidence
 
