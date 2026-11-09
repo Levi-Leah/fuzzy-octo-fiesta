@@ -16,9 +16,11 @@ Before changing the image:
 4. Note any commands run at startup, such as database migrations or cache warm-up. Record which external services must be reachable before the application is ready.
 5. Confirm how to restore the existing release.
 
-**General startup lesson:** Replacing a shell wrapper or package-manager command can change how quickly the application reaches its first network request. A successful deployment may therefore expose an existing dependency race. Check readiness and retries even when you do **not** use Istio.
+> [!IMPORTANT]
+> **General startup lesson:** Replacing a shell wrapper or package-manager command can change how quickly the application reaches its first network request. A successful deployment may therefore expose an existing dependency race. Check readiness and retries even when you do **not** use Istio.
 
-**Do not skip rollback preparation.** Rolling back the image may not undo a database schema change.
+> [!WARNING]
+> Do not skip rollback preparation. Rolling back the image may not undo a database schema change.
 
 ## 2. Choose the replacement images
 
@@ -27,7 +29,15 @@ Before changing the image:
 3. Copy both full image references with their `sha256` digests.
 4. Check the cluster CPU architecture and any native dependencies.
 
-Use the **published image catalog or Artifactory**, not a README version list alone, to confirm availability. Digest pinning identifies the base image used in a given build.
+Use the **published image catalog or Artifactory**, not a README version list alone, to confirm availability. Digest pinning identifies the base image used in a given build. [TODO: link to image catalog and registry access instructions]
+
+Inspect the target image before changing the Dockerfile:
+
+```sh
+docker manifest inspect REGISTRY/RUNTIME@sha256:RUNTIME_DIGEST
+```
+
+Replace the reference with a real published image digest.
 
 ## 3. Update the Dockerfile
 
@@ -38,7 +48,18 @@ Use the **published image catalog or Artifactory**, not a README version list al
 5. Set permissions before the shell-free runtime stage, or use `COPY --chown` / `COPY --chmod`.
 6. Keep the runtime's default non-root identity unless the approved image requirements say otherwise.
 
-Do not copy the entire builder filesystem. Do not add a shell or package manager back to the final image.
+> [!WARNING]
+> Do not copy the entire builder filesystem into production or add a shell or package manager back to the final image.
+
+Build and inspect the modified service image from its application repository:
+
+```sh
+docker build --pull -t gold-service:migration-test .
+docker image inspect gold-service:migration-test --format '{{.Config.User}}'
+docker image inspect gold-service:migration-test --format '{{json .Config.Entrypoint}} {{json .Config.Cmd}}'
+```
+
+These commands check the built image and its configured startup metadata, not full runtime security. For the two-stage Dockerfile pattern, see [Onboarding: Create and build the service image](OnboardingGuide.md#3-create-and-build-the-service-image).
 
 The [onboarding guide](OnboardingGuide.md) explains the general two-stage pattern and language-specific differences.
 
@@ -57,13 +78,15 @@ command: ["/bin/sh", "-c"]
 args: ["npx prisma migrate deploy && node index.js"]
 ```
 
-It requires both `/bin/sh` and `npx`. Move dependency installation to the builder, and run the installed application through its interpreter or binary.
+> [!IMPORTANT]
+> This command requires both `/bin/sh` and `npx`. Move dependency installation to the builder, and run the installed application through its interpreter or binary.
 
 If startup requires several steps, use a deliberately written application entrypoint or a suitable separate deployment task. Test errors and exit codes. Do not silently remove database migrations or other required work.
 
 For Python, a direct command such as `python3 -m uvicorn ...` may be appropriate **if** the interpreter and module exist. A virtualenv console script is not automatically broken; verify its shebang, permissions, and dependencies.
 
-**Check the actual image:** command paths differ across languages and images.
+> [!IMPORTANT]
+> Check the actual image: command paths differ across languages and images. [TODO: links to language-specific runtime READMEs]
 
 ## 5. Check changes that can break the application
 
@@ -102,6 +125,27 @@ Check all writable mounts. In Kubernetes, a memory-backed `emptyDir` does not au
 
 ## 7. Test the migration in stages
 
+For a local test with a read-only root filesystem, run:
+
+```sh
+docker run --rm --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=128m,mode=1777 \
+  --cap-drop=ALL --security-opt=no-new-privileges \
+  gold-service:migration-test
+```
+
+Add approved runtime configuration and dependencies as needed. For a Kubernetes deployment, replace `NAMESPACE` and `DEPLOYMENT` below with your real values:
+
+```sh
+kubectl rollout status deployment/DEPLOYMENT -n NAMESPACE
+kubectl get pods -n NAMESPACE
+kubectl logs deployment/DEPLOYMENT -n NAMESPACE --all-containers=true --tail=100
+```
+
+These are basic health and log checks; they do not replace application tests or security validation.
+
+
+
 1. **Build:** Confirm that all required runtime files exist and the final image is scanned.
 2. **Start locally:** Run the final image as non-root with a read-only root filesystem. Confirm the real entrypoint works without a shell.
 3. **Test in staging:** Verify startup, health checks, requests, shutdown, restarts, certificates, DNS, secrets, and external connections.
@@ -112,6 +156,8 @@ Check all writable mounts. In Kubernetes, a memory-backed `emptyDir` does not au
 
 **Optional — Istio:** If the workload uses an Istio sidecar and makes outbound calls at startup, follow [Istio startup checks](IstioStartup.md). This is not a required step for services without Istio.
 
+After the successful rollout, teams using the shared inventory can follow [Register a deployment](DeploymentTracking.md). It is an optional post-deployment step.
+
 ## 8. Roll back if needed
 
 1. Restore the last known good **application image and matching deployment configuration**.
@@ -119,7 +165,18 @@ Check all writable mounts. In Kubernetes, a memory-backed `emptyDir` does not au
 3. Review database schema compatibility separately; an image rollback may not reverse migrations.
 4. Record the failed check and fix it before retrying.
 
-Do not work around failures by permanently running as root, adding a shell, or disabling required security controls.
+For a Kubernetes Deployment using rollout history, the following may restore its previous Pod template:
+
+```sh
+kubectl rollout undo deployment/DEPLOYMENT -n NAMESPACE
+kubectl rollout status deployment/DEPLOYMENT -n NAMESPACE
+```
+
+> [!WARNING]
+> `rollout undo` does **not** reverse external changes such as database migrations. Confirm that the previous image and configuration remain compatible. Follow your team's release/rollback procedure; GitOps controllers may also reapply the desired state.
+
+> [!WARNING]
+> Do not work around failures by running as root, adding a shell, or disabling required security controls.
 
 ## Troubleshooting
 
@@ -154,4 +211,5 @@ Do not work around failures by permanently running as root, adding a shell, or d
 - [Runtime Hardening Guide](../BaseRuntimeHardeningGuide.md)
 - [Repository overview](../../README.md)
 - [Image publishing and supply-chain boundaries](../ImagePublishing.md)
-- Relevant language README and published image catalog
+- [Optional deployment tracking](DeploymentTracking.md)
+- [TODO: language-specific README links and published image catalog]
