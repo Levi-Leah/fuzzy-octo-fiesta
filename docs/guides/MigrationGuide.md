@@ -1,131 +1,77 @@
-# Migration guide: Move an existing service to gold images
+# Migration: Move an existing service to gold images
 
-Use this guide when your service **already runs** and you want to replace its current builder or runtime images with the shared gold images.
+Use this guide when an application already runs on another container image. The [onboarding guide](OnboardingGuide.md) explains gold builder/runtime images and the standard Dockerfile pattern.
 
-A gold **builder** supplies build tools. A gold **runtime** is a small, hardened image used to run the finished application. The runtime usually has no shell or package manager. Your service must not depend on those tools when it starts.
+## 1. Prepare a rollback
 
-For a new service, use the [onboarding guide](OnboardingGuide.md).
+Before editing the service:
 
-## 1. Record the current working configuration
-
-Before changing the image:
-
-1. Record the current application image digest and deployment configuration.
-2. Save the existing Dockerfile and startup command.
-3. List all runtime dependencies, including native libraries, certificates, writable directories, and external services.
-4. Note any commands run at startup, such as database migrations or cache warm-up. Record which external services must be reachable before the application is ready.
-5. Confirm how to restore the existing release.
-
-> [!IMPORTANT]
-> **General startup lesson:** Replacing a shell wrapper or package-manager command can change how quickly the application reaches its first network request. A successful deployment may therefore expose an existing dependency race. Check readiness and retries even when you do **not** use Istio.
+1. Save the current image digest, Dockerfile, and deployment configuration.
+2. Record the existing startup command, writable paths, native dependencies, CA certificates, and external services.
+3. Identify startup jobs such as database migrations and determine whether the previous release can run after they complete.
+4. Confirm your team's rollback method.
 
 > [!WARNING]
-> Do not skip rollback preparation. Rolling back the image may not undo a database schema change.
+> Reverting the application image does not undo a database schema migration or another external change.
 
-## 2. Choose the replacement images
+## 2. Replace the base images
 
-1. Open the published gold image catalog.
-2. Confirm that your language/version has published builder and runtime images.
-3. Copy both full image references with their `sha256` digests.
-4. Check the cluster CPU architecture and any native dependencies.
-
-Use the **published image catalog or Artifactory**, not a README version list alone, to confirm availability. Digest pinning identifies the base image used in a given build. [TODO: link to image catalog and registry access instructions]
-
-Inspect the target image before changing the Dockerfile:
+1. Select published builder and runtime digests from [TODO: gold image catalog].
+2. Confirm the target `amd64`/`arm64` architecture and application dependency compatibility.
+3. Replace the Dockerfile's build stage with the gold builder. Install dependencies and compile the application there.
+4. Replace the final stage with the gold runtime. Copy only the required output, keep it root-owned/non-writable, and preserve the runtime's non-root user.
 
 ```sh
+# Replace the placeholders with the published reference.
 docker manifest inspect REGISTRY/RUNTIME@sha256:RUNTIME_DIGEST
-```
 
-Replace the reference with a real published image digest.
-
-## 3. Update the Dockerfile
-
-1. Replace the old build stage with the appropriate gold **builder** image.
-2. Install dependencies and build the application in that stage.
-3. Use the matching gold **runtime** image for the final stage.
-4. Copy only the required application files and runtime dependencies.
-5. Set permissions before the shell-free runtime stage, or use `COPY --chown` / `COPY --chmod`.
-6. Keep the runtime's default non-root identity unless the approved image requirements say otherwise.
-
-> [!WARNING]
-> Do not copy the entire builder filesystem into production or add a shell or package manager back to the final image.
-
-Build and inspect the modified service image from its application repository:
-
-```sh
+# Run from the service repository after editing its Dockerfile.
 docker build --pull -t gold-service:migration-test .
 docker image inspect gold-service:migration-test --format '{{.Config.User}}'
 docker image inspect gold-service:migration-test --format '{{json .Config.Entrypoint}} {{json .Config.Cmd}}'
 ```
 
-These commands check the built image and its configured startup metadata, not full runtime security. For the two-stage Dockerfile pattern, see [Onboarding: Create and build the service image](OnboardingGuide.md#3-create-and-build-the-service-image).
+For the Dockerfile layout, see [Onboarding: Create your Dockerfile](OnboardingGuide.md#2-create-your-dockerfile). For language-specific instructions, see [TODO: language READMEs].
 
-The [onboarding guide](OnboardingGuide.md) explains the general two-stage pattern and language-specific differences.
+> [!WARNING]
+> Do not restore compatibility by adding a shell, package manager, build tools, or extra privileges to the production image.
 
-## 4. Replace shell-dependent startup commands
+## 3. Adapt startup behavior
 
-Review **all** of these locations:
+Check Dockerfile `CMD`/`ENTRYPOINT`, Kubernetes `command`/`args`, and any startup hooks.
 
-- Dockerfile `CMD` and `ENTRYPOINT`.
-- Kubernetes `command` and `args`.
-- Entrypoint scripts, package-manager commands, and application startup hooks.
-
-For example, this existing Kubernetes command is **not compatible** with a shell-free runtime:
+An old command like this requires tools that are absent from a distroless runtime:
 
 ```yaml
 command: ["/bin/sh", "-c"]
 args: ["npx prisma migrate deploy && node index.js"]
 ```
 
-> [!IMPORTANT]
-> This command requires both `/bin/sh` and `npx`. Move dependency installation to the builder, and run the installed application through its interpreter or binary.
+Start the installed executable or interpreter directly. If the service needs multiple startup actions, use an application entrypoint that handles their failures or an appropriate separate deployment task. For Python, `python3 -m uvicorn ...` may be suitable when that interpreter and module exist; a virtualenv console script is not automatically incompatible.
 
-If startup requires several steps, use a deliberately written application entrypoint or a suitable separate deployment task. Test errors and exit codes. Do not silently remove database migrations or other required work.
-
-For Python, a direct command such as `python3 -m uvicorn ...` may be appropriate **if** the interpreter and module exist. A virtualenv console script is not automatically broken; verify its shebang, permissions, and dependencies.
+**Check startup timing:** Removing a shell wrapper can change when the first database, cache, or API connection happens. Verify readiness, retries, and timeouts instead of assuming the external service will already be available.
 
 > [!IMPORTANT]
-> Check the actual image: command paths differ across languages and images. [TODO: links to language-specific runtime READMEs]
+> Use the executable paths supplied by the **selected image**; do not assume every language uses the same paths. [TODO: runtime command reference]
 
-## 5. Check changes that can break the application
+## 4. Check runtime compatibility
 
-### Files and runtime identity
+Review the following only for changes introduced by the new runtime:
 
-- The root filesystem should be read-only at deployment.
-- Application files must be root-owned and not writable by the runtime user.
-- Move legitimate temporary writes to approved writable mounts; disable unnecessary caches.
-- Verify the selected runtime UID/GID. The supplied `:nonroot` images use **65532**, while the .NET chiseled image description uses **1654**.
+- **File writes and identity:** Check the effective runtime UID, application permissions, caches, and temporary directories. The documented distroless UID/GID is `65532`; .NET chiseled uses `1654`.
+- **TLS:** Test real connections with the required CA certificates. Java uses its JDK trust store. Never disable certificate verification to resolve a failure.
+- **Native libraries:** Check compiled modules and binaries on each architecture used by the service.
+- **Networking:** Confirm DNS, IAM permissions, secrets, egress policy, and access to external dependencies. Normal DNS configuration belongs to the container platform, not a baked-in `/etc/resolv.conf`.
 
-### Startup dependencies and external access
+## 5. Apply deployment controls
 
-- Check whether the application contacts databases, caches, or external APIs during startup.
-- Confirm when those destinations become available. Do not use a delay caused by a shell wrapper or package manager as a readiness mechanism.
-- Use appropriate dependency retries, timeouts, and readiness checks. A reachable database is not necessarily ready at the instant the app starts.
-- Consider moving one-time database migrations into a separate controlled deployment step, where appropriate. Rollback and schema compatibility still need planning.
+Use the [Security Contract](../SecurityContract.md) and [Hardening Guide](../BaseRuntimeHardeningGuide.md) to set the required non-root identity, read-only filesystem, dropped capabilities, no privilege escalation, and seccomp profile.
 
-### Certificates and external access
+Confirm that any `/tmp` mount has the required restrictions; an ordinary Kubernetes memory-backed `emptyDir` does not establish all mount flags.
 
-- Verify TLS against required endpoints. Supply CA certificates where needed.
-- Java uses its JDK trust store; internal CAs may need to be imported into it.
-- Check DNS, IAM permissions, secrets, and network policies.
-- Do **not** disable TLS verification to make a test pass.
+## 6. Test and roll out
 
-### Architecture and libraries
-
-- Test every target architecture (such as `amd64` and `arm64`).
-- Check native modules and compiled binaries, particularly Go/Rust static linking and .NET chiseled compatibility.
-- DNS settings normally come from the container platform. Do not bake `/etc/resolv.conf` into the image as a routine workaround.
-
-## 6. Apply the required deployment settings
-
-Review the [Security Contract](../SecurityContract.md) and [Hardening Guide](../BaseRuntimeHardeningGuide.md). The deployment must use a read-only root filesystem, non-root execution, dropped capabilities, no privilege escalation, and the approved seccomp profile.
-
-Check all writable mounts. In Kubernetes, a memory-backed `emptyDir` does not automatically enforce the required `noexec`, `nosuid`, and `nodev` flags. Verify the effective settings and use the platform-approved mechanism.
-
-## 7. Test the migration in stages
-
-For a local test with a read-only root filesystem, run:
+Test the **final image** locally with the hardened settings:
 
 ```sh
 docker run --rm --read-only \
@@ -134,7 +80,9 @@ docker run --rm --read-only \
   gold-service:migration-test
 ```
 
-Add approved runtime configuration and dependencies as needed. For a Kubernetes deployment, replace `NAMESPACE` and `DEPLOYMENT` below with your real values:
+In staging, test startup and restarts, application requests, external dependencies, and the effective security settings. Scan the final image. Then release gradually if your deployment system supports it.
+
+For Kubernetes, replace the example names with your Deployment and namespace:
 
 ```sh
 kubectl rollout status deployment/DEPLOYMENT -n NAMESPACE
@@ -142,30 +90,13 @@ kubectl get pods -n NAMESPACE
 kubectl logs deployment/DEPLOYMENT -n NAMESPACE --all-containers=true --tail=100
 ```
 
-These are basic health and log checks; they do not replace application tests or security validation.
+Watch health checks, restarts, connection errors, and application logs before completing the rollout.
 
+After a successful deployment, you may [register the deployment](DeploymentTracking.md) if your team uses the shared inventory.
 
+## 7. Roll back if the rollout fails
 
-1. **Build:** Confirm that all required runtime files exist and the final image is scanned.
-2. **Start locally:** Run the final image as non-root with a read-only root filesystem. Confirm the real entrypoint works without a shell.
-3. **Test in staging:** Verify startup, health checks, requests, shutdown, restarts, certificates, DNS, secrets, and external connections.
-4. **Test the deployment controls:** Inspect the effective security context and writable mounts.
-5. **Check startup tasks:** Confirm migrations, cache initialization, and other startup operations work correctly.
-6. **Release gradually:** Use a canary or small rollout if supported. Watch restarts, readiness, connection errors, and application logs.
-7. **Record the outcome:** Save the image digest, test evidence, configuration, and exceptions.
-
-**Optional — Istio:** If the workload uses an Istio sidecar and makes outbound calls at startup, follow [Istio startup checks](IstioStartup.md). This is not a required step for services without Istio.
-
-After the successful rollout, teams using the shared inventory can follow [Register a deployment](DeploymentTracking.md). It is an optional post-deployment step.
-
-## 8. Roll back if needed
-
-1. Restore the last known good **application image and matching deployment configuration**.
-2. Check application health and the external connections it needs.
-3. Review database schema compatibility separately; an image rollback may not reverse migrations.
-4. Record the failed check and fix it before retrying.
-
-For a Kubernetes Deployment using rollout history, the following may restore its previous Pod template:
+Restore the previously saved image **and matching deployment configuration** through your release process. For a Kubernetes Deployment with usable rollout history:
 
 ```sh
 kubectl rollout undo deployment/DEPLOYMENT -n NAMESPACE
@@ -173,43 +104,22 @@ kubectl rollout status deployment/DEPLOYMENT -n NAMESPACE
 ```
 
 > [!WARNING]
-> `rollout undo` does **not** reverse external changes such as database migrations. Confirm that the previous image and configuration remain compatible. Follow your team's release/rollback procedure; GitOps controllers may also reapply the desired state.
-
-> [!WARNING]
-> Do not work around failures by running as root, adding a shell, or disabling required security controls.
+> A GitOps controller may restore the currently declared state. Confirm database/schema compatibility and follow the team's rollback procedure before using this command.
 
 ## Troubleshooting
 
-| Symptom | First thing to check |
+| Symptom | Check |
 | --- | --- |
-| `/bin/sh` not found | Shell-based Dockerfile or Kubernetes startup command |
-| `npx` or another CLI not found | Build-only tool used at runtime; wrong executable path |
-| Permission denied | Actual runtime UID, file ownership, execute permissions |
-| Read-only filesystem error | Write to a path without an approved writable mount |
-| TLS / unknown CA error | Correct certificates and language-specific trust store |
-| Works on AMD64 but fails on ARM64 | Native dependencies or binary architecture |
-| DNS failure | Runtime DNS configuration and service discovery |
-| External connection fails during startup | Check dependency readiness, network policies, and retry/timeout handling; see [Istio startup checks](IstioStartup.md) **only if using Istio** |
-
-## Migration checklist
-
-- [ ] Previous release and rollback configuration saved.
-- [ ] Published gold images selected by digest.
-- [ ] Build tools and dependencies kept out of the runtime image.
-- [ ] Startup commands tested without a shell.
-- [ ] Permissions, UID, writable paths, and CA trust tested.
-- [ ] IAM, network access, DNS, secrets, and CPU architecture checked.
-- [ ] Security Contract requirements verified.
-- [ ] Startup dependencies and readiness/retry behavior tested; Istio checks completed **only if used**.
-- [ ] Final image scanned, staged rollout monitored, and evidence recorded.
+| `/bin/sh` or `npx` not found | Old shell/package-manager startup command |
+| Permission denied / read-only filesystem | Effective UID, file modes, intended writable mounts |
+| Unknown CA / TLS failure | Runtime-specific trust store and supplied certificates |
+| Works on AMD64, fails on ARM64 | Binary architecture and native dependencies |
+| DNS or connection failure | DNS configuration, network rules, destination health |
+| Connection fails only at startup | Dependency readiness and retry behavior; [Istio-specific checks](IstioStartup.md) **only if the service uses Istio** |
 
 ## References
 
 - [Onboarding guide](OnboardingGuide.md)
-- [Istio startup checks — only for Istio workloads](IstioStartup.md)
 - [Security Contract](../SecurityContract.md)
-- [Runtime Hardening Guide](../BaseRuntimeHardeningGuide.md)
-- [Repository overview](../../README.md)
-- [Image publishing and supply-chain boundaries](../ImagePublishing.md)
-- [Optional deployment tracking](DeploymentTracking.md)
-- [TODO: language-specific README links and published image catalog]
+- [Hardening Guide](../BaseRuntimeHardeningGuide.md)
+- [TODO: gold image catalog and language READMEs]
